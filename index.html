@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#11161f">
+  <meta name="description" content="TITAN Heavy Ops storm debris recovery and load tracking assistant.">
+  <link rel="manifest" href="./manifest.json">
+  <link rel="icon" href="./icon.svg" type="image/svg+xml">
+  <title>TITAN HEAVY OPS</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; background: #0b0f14; font-family: system-ui, sans-serif; }
+    #app { position: fixed; inset: 0; width: 100%; height: 100%; border: 0; }
+    #install-button {
+      position: fixed; z-index: 10; top: max(12px, env(safe-area-inset-top)); right: 12px;
+      min-height: 44px; padding: 10px 14px; border: 1px solid #ffc107; border-radius: 8px;
+      background: #11161f; color: #ffc107; font: 700 13px system-ui, sans-serif;
+      box-shadow: 0 4px 16px #0008; cursor: pointer;
+    }
+    #install-button[hidden] { display: none; }
+    #install-help {
+      position: fixed; z-index: 11; top: calc(max(12px, env(safe-area-inset-top)) + 54px); right: 12px;
+      width: min(290px, calc(100vw - 24px)); padding: 14px; border: 1px solid #2e3a4b;
+      border-radius: 8px; background: #11161f; color: #f1f5f9; font: 14px/1.5 system-ui, sans-serif;
+      box-shadow: 0 8px 24px #000a;
+    }
+    #install-help[hidden] { display: none; }
+    #install-help button { float: right; border: 0; background: none; color: #cbd5e1; font-size: 20px; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <iframe id="app" title="TITAN Heavy Ops" src="./ai_studio_code%20(2).html" allow="geolocation; camera"></iframe>
+  <button id="install-button" type="button" aria-label="Add TITAN Heavy Ops to your home screen" hidden>＋ ADD TO HOME SCREEN</button>
+  <aside id="install-help" role="status" aria-live="polite" hidden>
+    <button type="button" id="close-help" aria-label="Close">×</button>
+    <strong>Install TITAN Heavy Ops</strong>
+    <div id="install-message"></div>
+  </aside>
+  <script>
+    const installButton = document.getElementById('install-button');
+    const help = document.getElementById('install-help');
+    const message = document.getElementById('install-message');
+    let installPrompt;
+
+    const isInstalled = () => window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+    const isIOS = () => /iphone|ipad|ipod/i.test(window.navigator.userAgent);
+
+    if (!isInstalled()) installButton.hidden = false;
+
+    window.addEventListener('beforeinstallprompt', (event) => {
+      event.preventDefault();
+      installPrompt = event;
+      installButton.hidden = false;
+      installButton.textContent = '＋ ADD TO HOME SCREEN';
+    });
+
+    window.addEventListener('appinstalled', () => {
+      installPrompt = null;
+      installButton.hidden = true;
+      help.hidden = true;
+    });
+
+    installButton.addEventListener('click', async () => {
+      if (installPrompt) {
+        installPrompt.prompt();
+        await installPrompt.userChoice;
+        installPrompt = null;
+        return;
+      }
+
+      message.textContent = isIOS()
+        ? 'In Safari, tap Share, then choose “Add to Home Screen”.'
+        : 'To install, open your browser menu and choose “Install app” or “Add to Home screen”.';
+      help.hidden = false;
+    });
+
+    document.getElementById('close-help').addEventListener('click', () => { help.hidden = true; });
+
+    if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./service-worker.js').catch((error) => {
+          console.error('Service worker registration failed:', error);
+        });
+      });
+    }
+  </script>
+</body>
+</html>
