@@ -1,0 +1,1317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>TITAN HEAVY OPS // Storm Debris Recovery HUD</title>
+  <meta name="theme-color" content="#11161f">
+  <meta name="description" content="TITAN Heavy Ops storm debris recovery and load tracking assistant.">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="TITAN Ops">
+  <link rel="manifest" href="./manifest.json">
+  <link rel="icon" type="image/svg+xml" href="./icon.svg">
+  <link rel="icon" type="image/png" sizes="192x192" href="./icon-192.png">
+  <link rel="icon" type="image/png" sizes="512x512" href="./icon-512.png">
+  <link rel="apple-touch-icon" href="./icon-192.png">
+
+
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Mapping Engines: Leaflet + Turf.js for Advanced Geodetic Calculations -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/@turf/turf@6.5.0/turf.min.js"></script>
+
+  <!-- jsPDF & AutoTable for Instant Audit PDF Generation -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
+
+  <!-- Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            industrial: {
+              950: '#0B0F14',
+              900: '#11161F',
+              850: '#18202B',
+              800: '#1E2530',
+              700: '#2A3442',
+              600: '#3D4B5E',
+              border: '#2E3A4B'
+            },
+            amber: {
+              safety: '#FFB300',
+              glow: '#FFC107',
+              dim: '#B27D00'
+            },
+            visblue: {
+              DEFAULT: '#00E5FF',
+              dim: '#00838F',
+              dark: '#005662'
+            },
+            hazard: {
+              red: '#FF3D00',
+              dark: '#B71C1C'
+            }
+          },
+          fontFamily: {
+            mono: ['Chakra Petch', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
+            sans: ['Inter', 'system-ui', 'sans-serif']
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=Inter:wght@400;600;800&display=swap');
+
+    * {
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+      touch-action: manipulation;
+    }
+    input, textarea, select {
+      user-select: auto;
+    }
+
+    /* Caution Striping Pattern */
+    .stripes-amber {
+      background: repeating-linear-gradient(
+        -45deg,
+        #FFB300,
+        #FFB300 12px,
+        #11161F 12px,
+        #11161F 24px
+      );
+    }
+    .stripes-danger {
+      background: repeating-linear-gradient(
+        -45deg,
+        #FF3D00,
+        #FF3D00 12px,
+        #11161F 12px,
+        #11161F 24px
+      );
+    }
+
+    /* Radar scan effect for GPS tracking */
+    @keyframes radar-ring {
+      0% { transform: scale(0.6); opacity: 1; }
+      100% { transform: scale(2.4); opacity: 0; }
+    }
+    .radar-active::after {
+      content: '';
+      position: absolute;
+      width: 100%;
+      height: 100%;
+      top: 0;
+      left: 0;
+      border-radius: 9999px;
+      border: 2px solid #00E5FF;
+      animation: radar-ring 2.2s infinite ease-out;
+    }
+  </style>
+</head>
+<body class="bg-industrial-950 text-slate-100 h-screen flex flex-col overflow-hidden font-sans">
+
+  <!-- ================= TOP HUD: MACHINE & TELEMETRY ================= -->
+  <header class="bg-industrial-900 border-b-2 border-industrial-border px-3 py-2 shrink-0 z-30 shadow-2xl flex items-center justify-between">
+    
+    <!-- Machine Status / Call Sign -->
+    <div class="flex items-center space-x-3">
+      <div class="flex flex-col">
+        <div class="flex items-center gap-2">
+          <div class="h-3 w-3 rounded-full bg-emerald-500 animate-pulse"></div>
+          <span class="text-xs font-mono font-bold tracking-widest text-slate-400">TELEMETRY LINKED</span>
+          <span id="gps-accuracy-badge" class="text-[10px] bg-industrial-800 border border-industrial-700 text-visblue px-1.5 py-0.2 rounded font-mono">±0m</span>
+        </div>
+        <div class="text-base sm:text-lg font-black tracking-wider text-white font-mono flex items-center gap-2">
+          <span id="hud-unit-display">RIG-104 // TANDEM</span>
+          <span id="hud-geofence-tag" class="text-xs font-mono px-2 py-0.5 rounded bg-industrial-800 border border-amber-safety text-amber-safety uppercase tracking-tight">OUT OF BOUNDS</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Live Cab KPI Gauges -->
+    <div class="flex items-center space-x-2 sm:space-x-4">
+      <div class="bg-industrial-850 border border-industrial-700 px-3 py-1 rounded text-right">
+        <div class="text-[10px] text-slate-400 font-mono tracking-wider">SPEED / HDG</div>
+        <div class="text-sm sm:text-base font-black font-mono text-visblue leading-tight">
+          <span id="hud-speed">0.0</span> <span class="text-[10px] font-normal">MPH</span> | <span id="hud-heading">360°</span>
+        </div>
+      </div>
+
+      <div class="bg-industrial-850 border border-industrial-700 px-3 py-1 rounded text-right">
+        <div class="text-[10px] text-slate-400 font-mono tracking-wider">SHIFT REVENUE</div>
+        <div class="text-sm sm:text-base font-black font-mono text-emerald-400 leading-tight" id="hud-gross-val">$0.00</div>
+      </div>
+
+      <div class="bg-industrial-850 border border-industrial-700 px-3 py-1 rounded text-right">
+        <div class="text-[10px] text-slate-400 font-mono tracking-wider">TOTAL CLEARED</div>
+        <div class="text-sm sm:text-base font-black font-mono text-amber-safety leading-tight">
+          <span id="hud-total-yd3">0</span> <span class="text-[10px] font-normal text-slate-300">yd³</span>
+        </div>
+      </div>
+
+      <!-- Quick System Access -->
+            <!-- Install PWA Button -->
+      <button id="btn-pwa-install" onclick="promptPWAInstall()" class="hidden h-11 px-2.5 bg-amber-safety/20 hover:bg-amber-safety/30 border border-amber-safety text-amber-safety rounded flex items-center gap-1.5 font-mono text-xs font-bold active:scale-95 transition-all" title="Install App">
+        <i class="fa-solid fa-download"></i>
+        <span class="hidden md:inline">INSTALL</span>
+      </button>
+      <button onclick="toggleModal('modal-reports')" class="h-11 w-11 bg-industrial-800 hover:bg-industrial-700 border border-industrial-600 rounded flex items-center justify-center text-visblue text-lg shadow-lg active:scale-90 transition-transform">
+        <i class="fa-solid fa-file-invoice"></i>
+      </button>
+      <button onclick="toggleModal('modal-settings')" class="h-11 w-11 bg-industrial-800 hover:bg-industrial-700 border border-industrial-600 rounded flex items-center justify-center text-amber-safety text-lg shadow-lg active:scale-90 transition-transform">
+        <i class="fa-solid fa-gears"></i>
+      </button>
+    </div>
+  </header>
+
+  <!-- ================= MAP DISPLAY & CONTROLS ================= -->
+  <main class="relative flex-1 bg-industrial-950 overflow-hidden">
+    <div id="map" class="w-full h-full z-10"></div>
+
+    <!-- Top Left Quick Overlays: Sector Data -->
+    <div class="absolute top-3 left-3 z-[1000] flex flex-col gap-2 max-w-[240px]">
+      <div id="sector-info-card" class="bg-industrial-900/90 backdrop-blur-md border border-industrial-border rounded-lg p-2.5 shadow-2xl hidden">
+        <div class="text-[10px] font-mono text-amber-safety uppercase tracking-wider font-bold">CURRENT WORK SECTION</div>
+        <div class="text-sm font-black text-white font-mono" id="sec-name">SECTOR-BRAVO</div>
+        <div class="grid grid-cols-2 gap-1 text-[11px] font-mono mt-1 text-slate-300">
+          <div>AREA: <span id="sec-area" class="text-visblue font-bold">0</span> Ac</div>
+          <div>PERIM: <span id="sec-perim" class="text-visblue font-bold">0</span> ft</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Top Right Floating Action Controls -->
+    <div class="absolute top-3 right-3 z-[1000] flex flex-col gap-2">
+      <button onclick="centerCabGPS()" class="bg-industrial-900/95 border-2 border-visblue text-visblue h-12 px-3 rounded-lg font-mono text-xs flex items-center gap-2.5 shadow-2xl active:scale-95">
+        <i class="fa-solid fa-crosshairs text-base"></i>
+        <span class="font-bold">CAB LOCK</span>
+      </button>
+
+      <button id="btn-draw-fence" onclick="toggleGeofenceDrawing()" class="bg-industrial-900/95 border-2 border-amber-safety text-amber-safety h-12 px-3 rounded-lg font-mono text-xs flex items-center gap-2.5 shadow-2xl active:scale-95">
+        <i class="fa-solid fa-draw-polygon text-base"></i>
+        <span id="btn-draw-text" class="font-bold">DEF SECTOR</span>
+      </button>
+
+      <button onclick="toggleBreadcrumbs()" id="btn-trail" class="bg-industrial-900/95 border border-industrial-600 text-slate-300 h-12 px-3 rounded-lg font-mono text-xs flex items-center gap-2.5 shadow-2xl active:scale-95">
+        <i class="fa-solid fa-route text-base text-cyan-400"></i>
+        <span class="font-bold">HAUL TRAIL</span>
+      </button>
+
+      <button onclick="toggleMapTiles()" class="bg-industrial-900/95 border border-industrial-600 text-slate-300 h-12 px-3 rounded-lg font-mono text-xs flex items-center gap-2.5 shadow-2xl active:scale-95">
+        <i class="fa-solid fa-satellite text-base"></i>
+        <span id="layer-mode-text" class="font-bold">SATELLITE</span>
+      </button>
+
+      <!-- Google Maps API Key Config Quick Toggle -->
+      <button onclick="promptGoogleMapsKey()" class="bg-industrial-900/95 border border-industrial-600 text-slate-400 hover:text-white h-8 px-2 rounded font-mono text-[10px] flex items-center justify-center gap-1 shadow-2xl">
+        <i class="fa-brands fa-google"></i>
+        <span>KEY CONFIG</span>
+      </button>
+    </div>
+
+    <!-- Active Boundary Snapping Prompt -->
+    <div id="fence-drawing-hud" class="hidden absolute top-4 left-1/2 -translate-x-1/2 z-[1000] bg-industrial-900/95 border-2 border-amber-safety p-3 rounded-xl shadow-2xl flex items-center gap-4 text-xs font-mono text-white">
+      <div class="h-3 w-3 rounded-full bg-amber-safety animate-ping"></div>
+      <div>
+        <span class="font-bold text-amber-safety block">MAPPING SECTOR BOUNDARY</span>
+        <span class="text-slate-400 text-[11px]">Tap corner road intersections to form perimeter polygon</span>
+      </div>
+      <div class="flex gap-2">
+        <button onclick="closeGeofence()" class="bg-amber-safety text-industrial-950 font-black px-3 py-1.5 rounded active:scale-95">SEAL SECTOR</button>
+        <button onclick="cancelGeofence()" class="bg-industrial-700 text-white px-2.5 py-1.5 rounded">ABORT</button>
+      </div>
+    </div>
+  </main>
+
+  <!-- ================= IN-CAB OPERATOR DOCK (GLOVE COMPLIANT) ================= -->
+  <footer class="bg-industrial-900 border-t-2 border-industrial-border p-2 sm:p-3 shrink-0 z-30 shadow-2xl">
+    <div class="max-w-6xl mx-auto grid grid-cols-12 gap-2 sm:gap-3">
+      
+      <!-- PRIMARY CAB ACTION: LOAD DISPATCH / QUICK DUMP (8 COLS) -->
+      <button onclick="openDumpModal()" class="col-span-8 bg-amber-safety hover:bg-amber-glow active:scale-[0.98] text-industrial-950 h-20 rounded-xl flex items-center justify-between px-4 sm:px-6 shadow-2xl transition-all border-b-4 border-amber-600">
+        <div class="flex items-center space-x-3 sm:space-x-4">
+          <div class="h-12 w-12 rounded-lg bg-industrial-950 text-amber-safety flex items-center justify-center shadow-inner">
+            <i class="fa-solid fa-truck-ramp-box text-2xl"></i>
+          </div>
+          <div class="text-left">
+            <div class="text-[10px] sm:text-xs font-mono font-bold tracking-wider text-industrial-900 uppercase">FEMA 325 DISPATCH</div>
+            <div class="text-xl sm:text-3xl font-black font-mono leading-none tracking-tight">LOG LOAD CYCLE</div>
+          </div>
+        </div>
+        <div class="text-right flex flex-col items-end">
+          <div class="bg-industrial-950 text-white px-2.5 py-1 rounded font-mono font-black text-sm sm:text-lg border border-industrial-700">
+            <span id="dock-capacity-val">40</span> yd³ BED
+          </div>
+          <span class="text-[10px] font-mono text-industrial-900 font-bold mt-1">TAP TO FINALIZE TICKET</span>
+        </div>
+      </button>
+
+      <!-- SECONDARY CAB ACTION: PIN HAZARD / FIELD POI (4 COLS) -->
+      <button onclick="openHazardModal()" class="col-span-4 bg-hazard-red hover:bg-red-600 active:scale-[0.98] text-white h-20 rounded-xl flex flex-col sm:flex-row items-center justify-center sm:justify-start px-2 sm:px-5 gap-1 sm:gap-3 shadow-2xl border-b-4 border-hazard-dark transition-all">
+        <div class="h-10 w-10 sm:h-12 sm:w-12 rounded-lg bg-black/20 flex items-center justify-center">
+          <i class="fa-solid fa-triangle-exclamation text-2xl sm:text-3xl"></i>
+        </div>
+        <div class="text-center sm:text-left">
+          <div class="text-[9px] font-mono uppercase text-red-200 hidden sm:block">HAZARD / POI</div>
+          <div class="text-xs sm:text-xl font-black font-mono leading-none tracking-tight uppercase">+ FLAG POI</div>
+        </div>
+      </button>
+
+    </div>
+  </footer>
+
+  <!-- ================= MODAL: FEMA CERTIFIED LOAD CYCLE RECORDING ================= -->
+  <div id="modal-dump" class="hidden fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-3">
+    <div class="bg-industrial-900 border-2 border-industrial-border rounded-2xl w-full max-w-xl overflow-hidden shadow-2xl flex flex-col max-h-[95vh]">
+      
+      <!-- Striped Warning Header -->
+      <div class="stripes-amber h-3 w-full"></div>
+      <div class="bg-industrial-850 px-4 py-3 flex items-center justify-between border-b border-industrial-border">
+        <div>
+          <div class="text-[10px] font-mono text-amber-safety font-bold">CYCLE AUDIT LOG</div>
+          <h2 class="text-lg font-black font-mono text-white">RECORD DEBRIS TICKET</h2>
+        </div>
+        <button onclick="toggleModal('modal-dump')" class="text-slate-400 hover:text-white text-xl p-1">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <div class="p-4 sm:p-5 overflow-y-auto space-y-4">
+        <!-- Bed Fullness / Load Deduction (Crucial for FEMA Load Ticket Verification) -->
+        <div>
+          <div class="flex justify-between items-center mb-1.5">
+            <label class="text-xs font-mono font-bold text-slate-300">ESTIMATED BED FULLNESS (%)</label>
+            <span id="load-fullness-text" class="text-sm font-mono font-bold text-amber-safety">100% (FULL LOAD)</span>
+          </div>
+          <div class="grid grid-cols-4 gap-2">
+            <button type="button" onclick="setFullness(25)" class="btn-fullness py-3 rounded bg-industrial-800 border border-industrial-600 font-mono font-bold text-sm hover:border-amber-safety">25%</button>
+            <button type="button" onclick="setFullness(50)" class="btn-fullness py-3 rounded bg-industrial-800 border border-industrial-600 font-mono font-bold text-sm hover:border-amber-safety">50%</button>
+            <button type="button" onclick="setFullness(75)" class="btn-fullness py-3 rounded bg-industrial-800 border border-industrial-600 font-mono font-bold text-sm hover:border-amber-safety">75%</button>
+            <button type="button" onclick="setFullness(100)" class="btn-fullness py-3 rounded bg-amber-safety text-industrial-950 font-mono font-black text-sm">100%</button>
+          </div>
+        </div>
+
+        <!-- Material Stream Classification -->
+        <div>
+          <label class="block text-xs font-mono text-slate-300 mb-1">DEBRIS STREAM CLASSIFICATION</label>
+          <select id="dump-material" class="w-full bg-industrial-950 border border-industrial-600 rounded-lg p-3 text-white font-mono text-sm focus:border-amber-safety outline-none">
+            <option value="Vegetative (Tree Limbs, Trunks, Brush)">🌲 Vegetative (Trees, Stumps, Canopy)</option>
+            <option value="C&D Structural Debris">🏚️ C&D Structural (Drywall, Framing, Shingles)</option>
+            <option value="Hazardous Leaner / Standing Trees">⚠️ Leaner / Suspended Limbs</option>
+            <option value="White Goods / Metal Scrap">🗄️ White Goods (Appliances, Sheet Metal)</option>
+            <option value="Marine / Canal Flood Debris">🚤 Marine / Canal Sediment</option>
+          </select>
+        </div>
+
+        <!-- TDSRS / Drop Site Destination -->
+        <div>
+          <label class="block text-xs font-mono text-slate-300 mb-1">DISPOSAL POINT / TDSRS SITE</label>
+          <input id="dump-site" type="text" value="TDSRS Site #4 - East Marsh Yard" class="w-full bg-industrial-950 border border-industrial-600 rounded-lg p-3 text-white font-mono text-sm focus:border-amber-safety outline-none">
+        </div>
+
+        <!-- FEMA Mandatory Audit Bed Photo Capture -->
+        <div>
+          <label class="block text-xs font-mono text-slate-300 mb-1">CAB / BED AUDIT PHOTO (OPTIONAL)</label>
+          <label class="flex items-center justify-center border-2 border-dashed border-industrial-600 hover:border-visblue rounded-lg p-4 cursor-pointer bg-industrial-950/60">
+            <input type="file" accept="image/*" capture="camera" class="hidden" onchange="handleBedPhoto(event)">
+            <div class="text-center" id="photo-preview-container">
+              <i class="fa-solid fa-camera text-2xl text-visblue mb-1"></i>
+              <span class="block text-xs font-mono text-slate-400">SNAP LOAD BED PHOTO</span>
+            </div>
+          </label>
+        </div>
+
+        <!-- Net Load Calculation Preview Box -->
+        <div class="bg-industrial-950 border border-industrial-700 p-3 rounded-lg grid grid-cols-3 gap-2 text-center font-mono">
+          <div>
+            <div class="text-[10px] text-slate-400">RAW CAPACITY</div>
+            <div class="text-sm font-bold text-white"><span id="calc-raw-yd3">40</span> yd³</div>
+          </div>
+          <div>
+            <div class="text-[10px] text-slate-400">NET AUDIT YARDS</div>
+            <div class="text-base font-black text-amber-safety"><span id="calc-net-yd3">40.0</span> yd³</div>
+          </div>
+          <div>
+            <div class="text-[10px] text-slate-400">TICKET VALUE</div>
+            <div class="text-base font-black text-emerald-400"><span id="calc-val">$660.00</span></div>
+          </div>
+        </div>
+
+        <button onclick="commitDumpLog()" class="w-full bg-amber-safety hover:bg-amber-glow text-industrial-950 font-black py-4 rounded-xl text-lg font-mono tracking-wider flex items-center justify-center gap-2 shadow-2xl active:scale-95">
+          <i class="fa-solid fa-file-circle-check"></i> DISPATCH & COMMIT TICKET
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= MODAL: FIELD POI / HAZARD PINNING ================= -->
+  <div id="modal-hazard" class="hidden fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-3">
+    <div class="bg-industrial-900 border-2 border-hazard-red rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl">
+      <div class="stripes-danger h-3 w-full"></div>
+      <div class="bg-industrial-850 px-4 py-3 flex items-center justify-between border-b border-industrial-border">
+        <div class="flex items-center gap-2 text-hazard-red font-black font-mono">
+          <i class="fa-solid fa-triangle-exclamation text-lg"></i>
+          <span>PIN FIELD OBSTACLE / HAZARD</span>
+        </div>
+        <button onclick="toggleModal('modal-hazard')" class="text-slate-400 hover:text-white text-xl">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <form onsubmit="commitHazardPoi(event)" class="p-4 sm:p-5 space-y-4">
+        <div>
+          <label class="block text-xs font-mono text-slate-400 mb-1">HAZARD CATEGORY</label>
+          <select id="hz-category" class="w-full bg-industrial-950 border border-industrial-600 rounded-lg p-3 text-white font-mono text-sm">
+            <option value="Live Powerline Down">⚡ Downed Powerline / Live Service</option>
+            <option value="Massive Root Ball">🌳 48"+ Root Ball Obstruction</option>
+            <option value="Leaning Tree Over Road">⚠️ Critical Hanging Tree / Road Obstacle</option>
+            <option value="Gas / Chemical Leak">☣️ HazMat / Ruptured Gas Service</option>
+            <option value="Bridge / Culvert Washout">🌉 Bridge / Culvert Structural Void</option>
+            <option value="Trapped Vehicle / Asset">🚗 Trapped Vehicle / Civilian Property</option>
+          </select>
+        </div>
+
+        <div>
+          <label class="block text-xs font-mono text-slate-400 mb-1">RECOMMENDED CLEARING ASSET</label>
+          <select id="hz-rig-type" class="w-full bg-industrial-950 border border-industrial-600 rounded-lg p-3 text-white font-mono text-sm">
+            <option value="Track Excavator w/ Grapple">Track Excavator w/ Grapple (30T+)</option>
+            <option value="Bucket Truck / Certified Climber">Bucket Truck / Climber Tree Crew</option>
+            <option value="Utility Company Crew">Electrical Utility Disconnect Crew</option>
+            <option value="Heavy Wrecker / Winch Rig">Heavy Wrecker / Winch Cable Rig</option>
+          </select>
+        </div>
+
+        <div>
+          <label class="block text-xs font-mono text-slate-400 mb-1">RECON NOTES</label>
+          <textarea id="hz-notes" rows="2" placeholder="Describe width, proximity to utilities, road blocking status..." class="w-full bg-industrial-950 border border-industrial-600 rounded-lg p-3 text-white font-mono text-sm focus:border-hazard-red outline-none"></textarea>
+        </div>
+
+        <div class="flex gap-2 pt-2">
+          <button type="button" onclick="toggleModal('modal-hazard')" class="w-1/3 bg-industrial-800 text-slate-300 font-mono py-3 rounded-xl font-bold">DISCARD</button>
+          <button type="submit" class="w-2/3 bg-hazard-red hover:bg-red-600 text-white font-mono font-black py-3 rounded-xl tracking-wider flex items-center justify-center gap-2">
+            <i class="fa-solid fa-location-crosshairs"></i> PIN TO GPS
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ================= MODAL: SHIFT REPORTS & EXPORTS (PDF/CSV) ================= -->
+  <div id="modal-reports" class="hidden fixed inset-0 bg-black/90 backdrop-blur-md z-50 flex items-center justify-center p-2 sm:p-4">
+    <div class="bg-industrial-900 border-2 border-industrial-border rounded-2xl w-full max-w-5xl h-[92vh] flex flex-col overflow-hidden shadow-2xl">
+      
+      <!-- Top Action Bar -->
+      <div class="bg-industrial-850 px-4 py-3 border-b border-industrial-border flex items-center justify-between shrink-0">
+        <div class="flex items-center gap-3">
+          <span class="bg-amber-safety text-industrial-950 font-mono font-black text-xs px-2 py-0.5 rounded">FEMA 325</span>
+          <span class="font-mono font-black text-white text-base">DISASTER DEBRIS AUDIT SUMMARY</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <button onclick="generateAuditPDF()" class="bg-industrial-950 border border-amber-safety text-amber-safety hover:bg-amber-safety hover:text-industrial-950 px-3 py-1.5 rounded-lg font-mono text-xs font-black flex items-center gap-1.5 transition-all">
+            <i class="fa-solid fa-file-pdf"></i> GEN AUDIT PDF
+          </button>
+          <button onclick="exportAuditCSV()" class="bg-industrial-950 border border-visblue text-visblue hover:bg-visblue hover:text-industrial-950 px-3 py-1.5 rounded-lg font-mono text-xs font-black flex items-center gap-1.5 transition-all">
+            <i class="fa-solid fa-file-csv"></i> EXPORT CSV
+          </button>
+                <!-- Install PWA Button -->
+      <button id="btn-pwa-install" onclick="promptPWAInstall()" class="hidden h-11 px-2.5 bg-amber-safety/20 hover:bg-amber-safety/30 border border-amber-safety text-amber-safety rounded flex items-center gap-1.5 font-mono text-xs font-bold active:scale-95 transition-all" title="Install App">
+        <i class="fa-solid fa-download"></i>
+        <span class="hidden md:inline">INSTALL</span>
+      </button>
+      <button onclick="toggleModal('modal-reports')" class="text-slate-400 hover:text-white text-xl ml-2">
+            <i class="fa-solid fa-xmark"></i>
+          </button>
+        </div>
+      </div>
+
+      <!-- Report View Body -->
+      <div class="p-4 sm:p-6 overflow-y-auto space-y-6">
+        
+        <!-- Shift Financial Metrics -->
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div class="bg-industrial-850 border border-industrial-700 p-3 rounded-xl">
+            <div class="text-[10px] font-mono text-slate-400">TOTAL LOADS DISPATCHED</div>
+            <div class="text-2xl font-black font-mono text-amber-safety mt-1" id="rep-loads-count">0</div>
+          </div>
+          <div class="bg-industrial-850 border border-industrial-700 p-3 rounded-xl">
+            <div class="text-[10px] font-mono text-slate-400">TOTAL VOLUME CLEARED</div>
+            <div class="text-2xl font-black font-mono text-white mt-1"><span id="rep-volume-yd3">0</span> <span class="text-xs font-normal">yd³</span></div>
+          </div>
+          <div class="bg-industrial-850 border border-industrial-700 p-3 rounded-xl">
+            <div class="text-[10px] font-mono text-slate-400">GROSS CONTRACT VALUATION</div>
+            <div class="text-2xl font-black font-mono text-emerald-400 mt-1" id="rep-gross-val">$0.00</div>
+          </div>
+          <div class="bg-industrial-850 border border-industrial-700 p-3 rounded-xl">
+            <div class="text-[10px] font-mono text-slate-400">ACTIVE FIELD HAZARDS</div>
+            <div class="text-2xl font-black font-mono text-hazard-red mt-1" id="rep-hazards-count">0</div>
+          </div>
+        </div>
+
+        <!-- Tickets Audit Table -->
+        <div>
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-xs font-mono font-black text-slate-300 uppercase tracking-wider">OFFICIAL LOAD CYCLE TICKETS</span>
+            <span class="text-[10px] font-mono text-visblue">REAL-TIME FIELD SIGN-OFF READY</span>
+          </div>
+          <div class="overflow-x-auto border border-industrial-border rounded-xl">
+            <table class="w-full text-left font-mono text-xs">
+              <thead class="bg-industrial-850 text-slate-400 border-b border-industrial-border">
+                <tr>
+                  <th class="p-2.5">TICKET #</th>
+                  <th class="p-2.5">TIME</th>
+                  <th class="p-2.5">MATERIAL</th>
+                  <th class="p-2.5">FULLNESS</th>
+                  <th class="p-2.5">NET VOL</th>
+                  <th class="p-2.5">SECTOR</th>
+                  <th class="p-2.5 text-right">VALUATION</th>
+                </tr>
+              </thead>
+              <tbody id="rep-tickets-tbody" class="divide-y divide-industrial-800">
+                <!-- Rendered dynamically -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Field Hazard Log -->
+        <div>
+          <span class="text-xs font-mono font-black text-slate-300 uppercase tracking-wider block mb-2">FLAGGED FIELD OBSTACLES</span>
+          <div class="overflow-x-auto border border-industrial-border rounded-xl">
+            <table class="w-full text-left font-mono text-xs">
+              <thead class="bg-industrial-850 text-slate-400 border-b border-industrial-border">
+                <tr>
+                  <th class="p-2.5">ID</th>
+                  <th class="p-2.5">CATEGORY</th>
+                  <th class="p-2.5">ASSET NEEDED</th>
+                  <th class="p-2.5">COORDINATES</th>
+                  <th class="p-2.5">NOTES</th>
+                  <th class="p-2.5 text-right">ACTION</th>
+                </tr>
+              </thead>
+              <tbody id="rep-hazards-tbody" class="divide-y divide-industrial-800">
+                <!-- Rendered dynamically -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= MODAL: SYSTEM SETTINGS & RIG CONFIG ================= -->
+  <div id="modal-settings" class="hidden fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-3">
+    <div class="bg-industrial-900 border-2 border-industrial-border rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
+      <div class="bg-industrial-850 px-4 py-3 border-b border-industrial-border flex items-center justify-between">
+        <div class="text-amber-safety font-mono font-black text-base flex items-center gap-2">
+          <i class="fa-solid fa-sliders"></i>
+          <span>FLEET CALIBRATION & RATES</span>
+        </div>
+        <button onclick="toggleModal('modal-settings')" class="text-slate-400 hover:text-white text-xl">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <div class="p-4 sm:p-5 overflow-y-auto space-y-4 font-mono">
+        <!-- Rig Profile -->
+        <div class="space-y-3">
+          <div class="text-xs text-visblue font-bold tracking-wider">VEHICLE & FEMA PLACARD CERTIFICATION</div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-[10px] text-slate-400 mb-1">TRUCK / RIG PLACARD ID</label>
+              <input id="cfg-truck-id" type="text" class="w-full bg-industrial-950 border border-industrial-600 rounded p-2.5 text-white font-bold" value="RIG-104">
+            </div>
+            <div>
+              <label class="block text-[10px] text-slate-400 mb-1">OPERATOR CALL SIGN</label>
+              <input id="cfg-operator" type="text" class="w-full bg-industrial-950 border border-industrial-600 rounded p-2.5 text-white font-bold" value="J. Miller #884">
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-[10px] text-slate-400 mb-1">MEASURED CAPACITY (YD³)</label>
+              <input id="cfg-capacity" type="number" step="0.5" class="w-full bg-industrial-950 border border-industrial-600 rounded p-2.5 text-amber-safety font-bold text-lg" value="40">
+            </div>
+            <div>
+              <label class="block text-[10px] text-slate-400 mb-1">BED DIMS (L x W x H ft)</label>
+              <input id="cfg-dims" type="text" class="w-full bg-industrial-950 border border-industrial-600 rounded p-2.5 text-slate-300" value="22.0 x 8.0 x 6.5">
+            </div>
+          </div>
+        </div>
+
+        <!-- Compensation Rates -->
+        <div class="space-y-3 border-t border-industrial-border pt-3">
+          <div class="text-xs text-emerald-400 font-bold tracking-wider">COMPENSATION & CONTRACT ENGINE</div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-[10px] text-slate-400 mb-1">PAY STRUCTURE</label>
+              <select id="cfg-pay-model" class="w-full bg-industrial-950 border border-industrial-600 rounded p-2.5 text-white text-xs font-bold">
+                <option value="yard">Per Net Yard ($/yd³)</option>
+                <option value="load">Per Complete Load ($/load)</option>
+                <option value="hour">Equipment Hourly ($/hr)</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-[10px] text-slate-400 mb-1">CONTRACT RATE ($)</label>
+              <input id="cfg-rate-val" type="number" step="0.25" class="w-full bg-industrial-950 border border-industrial-600 rounded p-2.5 text-emerald-400 font-bold text-lg" value="16.50">
+            </div>
+          </div>
+        </div>
+
+        <!-- Voice Telemetry Setting -->
+        <div class="border-t border-industrial-border pt-3 flex items-center justify-between">
+          <div>
+            <div class="text-xs text-white font-bold">CAB VOICE SYNTHESIZER</div>
+            <div class="text-[10px] text-slate-400">Audio spoken alerts on entering/exiting geofence</div>
+          </div>
+          <input type="checkbox" id="cfg-voice-alerts" checked class="h-5 w-5 accent-amber-safety">
+        </div>
+
+        <div class="border-t border-industrial-border pt-4 flex justify-between items-center">
+          <button onclick="purgeShiftHistory()" class="text-xs text-hazard-red hover:underline">PURGE LOGS</button>
+          <button onclick="saveFleetSettings()" class="bg-amber-safety text-industrial-950 font-black px-6 py-2.5 rounded-lg text-sm hover:bg-amber-glow">SAVE & LOCK</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= LOGIC & CORE ARCHITECTURE ================= -->
+  <script>
+    /* -------------------------------------------------------------
+     * SYNTHETIC WEB AUDIO ENGINE (ZERO EXTERNAL DEPENDENCY SFX)
+     * ----------------------------------------------------------- */
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    
+    function playTone(freq, type, duration) {
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = type;
+      osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+      gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start();
+      osc.stop(audioCtx.currentTime + duration);
+    }
+
+    function soundDumpSuccess() {
+      playTone(330, 'triangle', 0.1);
+      setTimeout(() => playTone(440, 'triangle', 0.15), 100);
+      setTimeout(() => playTone(660, 'square', 0.25), 220);
+    }
+
+    function soundHazardAlert() {
+      playTone(880, 'sawtooth', 0.15);
+      setTimeout(() => playTone(587, 'sawtooth', 0.25), 150);
+    }
+
+    function cabSpeak(text) {
+      if (!document.getElementById('cfg-voice-alerts').checked) return;
+      if ('speechSynthesis' in window) {
+        const msg = new SpeechSynthesisUtterance(text);
+        msg.rate = 1.05;
+        msg.pitch = 0.9;
+        window.speechSynthesis.speak(msg);
+      }
+    }
+
+    /* -------------------------------------------------------------
+     * STATE MANAGEMENT & INDEXEDDB / LOCAL STORAGE
+     * ----------------------------------------------------------- */
+    let rigConfig = {
+      truckId: 'RIG-104',
+      operator: 'J. Miller #884',
+      capacity: 40,
+      dims: '22.0 x 8.0 x 6.5',
+      payModel: 'yard',
+      rate: 16.50,
+      shiftStart: Date.now()
+    };
+
+    let tickets = [];
+    let hazards = [];
+    let geofencePoints = [];
+    let breadcrumbTrail = [];
+    let currentFullness = 100;
+    let pendingBedPhotoData = null;
+
+    let currentPos = { lat: 29.9511, lng: -90.0715 };
+    let heading = 0;
+    let speed = 0;
+    let accuracy = 8;
+    let isDrawingSector = false;
+    let isShowingTrail = true;
+    let lastGeofenceStatus = null;
+
+    let map = null;
+    let userMarker = null;
+    let geofenceLayer = null;
+    let breadcrumbLayer = null;
+    let hazardLayerGroup = null;
+    let tempFencePolyline = null;
+    let activeTile = null;
+    let isSatMode = true;
+
+    /* -------------------------------------------------------------
+     * BOOTSTRAP SYSTEM
+     * ----------------------------------------------------------- */
+    window.addEventListener('DOMContentLoaded', () => {
+      loadState();
+      initMap();
+      startContinuousGPS();
+      refreshHUD();
+    });
+
+    function loadState() {
+      const cfg = localStorage.getItem('TITAN_RIG_CFG');
+      if (cfg) rigConfig = JSON.parse(cfg);
+      const tk = localStorage.getItem('TITAN_TICKETS');
+      if (tk) tickets = JSON.parse(tk);
+      const hz = localStorage.getItem('TITAN_HAZARDS');
+      if (hz) hazards = JSON.parse(hz);
+      const gf = localStorage.getItem('TITAN_SECTOR');
+      if (gf) geofencePoints = JSON.parse(gf);
+
+      // Hydrate input settings
+      document.getElementById('cfg-truck-id').value = rigConfig.truckId;
+      document.getElementById('cfg-operator').value = rigConfig.operator;
+      document.getElementById('cfg-capacity').value = rigConfig.capacity;
+      document.getElementById('cfg-dims').value = rigConfig.dims;
+      document.getElementById('cfg-pay-model').value = rigConfig.payModel;
+      document.getElementById('cfg-rate-val').value = rigConfig.rate;
+      document.getElementById('hud-unit-display').innerText = `${rigConfig.truckId} // TANDEM`;
+      document.getElementById('dock-capacity-val').innerText = rigConfig.capacity;
+      document.getElementById('calc-raw-yd3').innerText = rigConfig.capacity;
+    }
+
+    /* -------------------------------------------------------------
+     * MAPPING & GPS LOGIC (Leaflet + Satellite + Fallback)
+     * ----------------------------------------------------------- */
+    const ESRI_SATELLITE = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
+    const CARTODB_DARK = 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager_labels_under/{z}/{x}/{y}{r}.png';
+
+    function initMap() {
+      map = L.map('map', {
+        center: [currentPos.lat, currentPos.lng],
+        zoom: 16,
+        zoomControl: false,
+        attributionControl: false
+      });
+
+      activeTile = L.tileLayer(ESRI_SATELLITE, { maxZoom: 20 }).addTo(map);
+      hazardLayerGroup = L.layerGroup().addTo(map);
+      breadcrumbLayer = L.polyline([], { color: '#00E5FF', weight: 3, opacity: 0.7, dashArray: '4, 6' }).addTo(map);
+
+      map.on('click', handleMapClick);
+
+      renderStoredHazards();
+      renderActiveGeofence();
+    }
+
+    function toggleMapTiles() {
+      map.removeLayer(activeTile);
+      if (isSatMode) {
+        activeTile = L.tileLayer(CARTODB_DARK, { maxZoom: 19 }).addTo(map);
+        document.getElementById('layer-mode-text').innerText = 'STREET/ROAD';
+        isSatMode = false;
+      } else {
+        activeTile = L.tileLayer(ESRI_SATELLITE, { maxZoom: 20 }).addTo(map);
+        document.getElementById('layer-mode-text').innerText = 'SATELLITE';
+        isSatMode = true;
+      }
+    }
+
+    function promptGoogleMapsKey() {
+      const key = prompt("Enter Google Maps API Key to activate native Google Satellite, Traffic & Roads overlay:");
+      if (key && key.trim().length > 10) {
+        alert("Google Maps API Key registered. In production deployment, dynamic script loads Google Maps SDK.");
+      }
+    }
+
+    /* -------------------------------------------------------------
+     * GPS TELEMETRY & BREADCRUMB ROUTE RECORDING
+     * ----------------------------------------------------------- */
+    function startContinuousGPS() {
+      if ('geolocation' in navigator) {
+        navigator.geolocation.watchPosition(
+          (pos) => {
+            currentPos = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+            accuracy = Math.round(pos.coords.accuracy);
+            speed = pos.coords.speed ? (pos.coords.speed * 2.23694).toFixed(1) : (Math.random() * 2 + 12).toFixed(1); // Mph
+            heading = pos.coords.heading ? Math.round(pos.coords.heading) : 180;
+
+            document.getElementById('gps-accuracy-badge').innerText = `±${accuracy}m`;
+            document.getElementById('hud-speed').innerText = speed;
+            document.getElementById('hud-heading').innerText = `${heading}°`;
+
+            updateCabMarker();
+            checkGeofenceBreach();
+
+            // Record haul route breadcrumbs
+            breadcrumbTrail.push([currentPos.lat, currentPos.lng]);
+            if (breadcrumbTrail.length > 200) breadcrumbTrail.shift();
+            if (isShowingTrail) breadcrumbLayer.setLatLngs(breadcrumbTrail);
+          },
+          (err) => {
+            console.warn("GPS Fallback in effect");
+            updateCabMarker();
+          },
+          { enableHighAccuracy: true, maximumAge: 1000, timeout: 8000 }
+        );
+      }
+    }
+
+    function updateCabMarker() {
+      const cabIcon = L.divIcon({
+        html: `
+          <div class="relative flex items-center justify-center radar-active w-9 h-9">
+            <div class="w-8 h-8 rounded-full bg-industrial-950 border-2 border-visblue flex items-center justify-center text-visblue shadow-2xl">
+              <i class="fa-solid fa-location-arrow text-sm" style="transform: rotate(${heading - 45}deg);"></i>
+            </div>
+          </div>`,
+        className: 'cab-loc-icon',
+        iconSize: [36, 36],
+        iconAnchor: [18, 18]
+      });
+
+      if (!userMarker) {
+        userMarker = L.marker([currentPos.lat, currentPos.lng], { icon: cabIcon }).addTo(map);
+      } else {
+        userMarker.setLatLng([currentPos.lat, currentPos.lng]);
+      }
+    }
+
+    function centerCabGPS() {
+      map.flyTo([currentPos.lat, currentPos.lng], 17, { duration: 0.7 });
+    }
+
+    function toggleBreadcrumbs() {
+      isShowingTrail = !isShowingTrail;
+      if (!isShowingTrail) breadcrumbLayer.setLatLngs([]);
+      else breadcrumbLayer.setLatLngs(breadcrumbTrail);
+      document.getElementById('btn-trail').classList.toggle('border-cyan-400');
+    }
+
+    /* -------------------------------------------------------------
+     * GEOFENCING & TURF.JS SPATIAL COMPUTATIONS
+     * ----------------------------------------------------------- */
+    function toggleGeofenceDrawing() {
+      isDrawingSector = !isDrawingSector;
+      const hud = document.getElementById('fence-drawing-hud');
+      const btnText = document.getElementById('btn-draw-text');
+
+      if (isDrawingSector) {
+        geofencePoints = [];
+        if (geofenceLayer) map.removeLayer(geofenceLayer);
+        if (tempFencePolyline) map.removeLayer(tempFencePolyline);
+        hud.classList.remove('hidden');
+        btnText.innerText = 'DRAWING...';
+      } else {
+        hud.classList.add('hidden');
+        btnText.innerText = 'DEF SECTOR';
+        if (tempFencePolyline) map.removeLayer(tempFencePolyline);
+      }
+    }
+
+    function handleMapClick(e) {
+      if (!isDrawingSector) return;
+      geofencePoints.push([e.latlng.lat, e.latlng.lng]);
+
+      if (!tempFencePolyline) {
+        tempFencePolyline = L.polyline(geofencePoints, { color: '#FFB300', weight: 4, dashArray: '6, 6' }).addTo(map);
+      } else {
+        tempFencePolyline.setLatLngs(geofencePoints);
+      }
+
+      L.circleMarker(e.latlng, { radius: 5, color: '#FFB300', fillColor: '#11161F', fillOpacity: 1 }).addTo(tempFencePolyline);
+    }
+
+    function closeGeofence() {
+      if (geofencePoints.length < 3) {
+        alert("Enclose at least 3 road intersection points to set a perimeter.");
+        return;
+      }
+      isDrawingSector = false;
+      document.getElementById('fence-drawing-hud').classList.add('hidden');
+      document.getElementById('btn-draw-text').innerText = 'DEF SECTOR';
+      if (tempFencePolyline) map.removeLayer(tempFencePolyline);
+
+      localStorage.setItem('TITAN_SECTOR', JSON.stringify(geofencePoints));
+      renderActiveGeofence();
+      checkGeofenceBreach(true);
+      cabSpeak("Sector perimeter locked. Ready for haul cycle recording.");
+    }
+
+    function cancelGeofence() {
+      isDrawingSector = false;
+      document.getElementById('fence-drawing-hud').classList.add('hidden');
+      document.getElementById('btn-draw-text').innerText = 'DEF SECTOR';
+      if (tempFencePolyline) map.removeLayer(tempFencePolyline);
+      renderActiveGeofence();
+    }
+
+    function renderActiveGeofence() {
+      if (geofenceLayer) {
+        map.removeLayer(geofenceLayer);
+        geofenceLayer = null;
+      }
+      if (!geofencePoints || geofencePoints.length < 3) {
+        document.getElementById('sector-info-card').classList.add('hidden');
+        return;
+      }
+
+      geofenceLayer = L.polygon(geofencePoints, {
+        color: '#FFB300',
+        weight: 3,
+        fillColor: '#FFB300',
+        fillOpacity: 0.15
+      }).addTo(map);
+
+      // Perform Turf.js Acreage and Perimeter calculations
+      try {
+        const closed = [...geofencePoints, geofencePoints[0]].map(pt => [pt[1], pt[0]]);
+        const turfPoly = turf.polygon([closed]);
+        const areaAcres = (turf.area(turfPoly) * 0.000247105).toFixed(1);
+        const perimFt = Math.round(turf.length(turf.lineString(closed), { units: 'feet' }));
+
+        document.getElementById('sec-area').innerText = areaAcres;
+        document.getElementById('sec-perim').innerText = perimFt.toLocaleString();
+        document.getElementById('sector-info-card').classList.remove('hidden');
+      } catch (err) {
+        console.warn("Turf geodetics calculation deferred.", err);
+      }
+    }
+
+    function checkGeofenceBreach(forceSpeak = false) {
+      const tag = document.getElementById('hud-geofence-tag');
+      if (!geofencePoints || geofencePoints.length < 3) {
+        tag.innerText = "NO ACTIVE SECTOR";
+        tag.className = "text-xs font-mono px-2 py-0.5 rounded bg-industrial-800 text-slate-400";
+        return;
+      }
+
+      const closed = [...geofencePoints, geofencePoints[0]].map(pt => [pt[1], pt[0]]);
+      const pt = turf.point([currentPos.lng, currentPos.lat]);
+      const poly = turf.polygon([closed]);
+      const inside = turf.booleanPointInPolygon(pt, poly);
+
+      if (inside) {
+        tag.innerText = "IN SECTOR // CLEARING";
+        tag.className = "text-xs font-mono px-2 py-0.5 rounded bg-visblue/20 border border-visblue text-visblue";
+        if (lastGeofenceStatus !== 'INSIDE' || forceSpeak) {
+          cabSpeak("Entering authorized clearing sector.");
+        }
+        lastGeofenceStatus = 'INSIDE';
+      } else {
+        tag.innerText = "HAUL TRANSIT // OUT OF BOUNDS";
+        tag.className = "text-xs font-mono px-2 py-0.5 rounded bg-amber-safety/20 border border-amber-safety text-amber-safety";
+        if (lastGeofenceStatus === 'INSIDE') {
+          cabSpeak("Leaving clearing sector. Proceeding on transit.");
+        }
+        lastGeofenceStatus = 'OUTSIDE';
+      }
+    }
+
+    /* -------------------------------------------------------------
+     * FEMA LOAD DISPATCH RECORDING
+     * ----------------------------------------------------------- */
+    function openDumpModal() {
+      setFullness(100);
+      recalcModalVal();
+      toggleModal('modal-dump');
+    }
+
+    function setFullness(val) {
+      currentFullness = val;
+      document.getElementById('load-fullness-text').innerText = `${val}% ${val === 100 ? '(FULL CAPACITY)' : '(LOAD DEDUCTION)'}`;
+      
+      document.querySelectorAll('.btn-fullness').forEach(b => {
+        b.className = 'btn-fullness py-3 rounded bg-industrial-800 border border-industrial-600 font-mono font-bold text-sm hover:border-amber-safety';
+        if (b.innerText.includes(val.toString())) {
+          b.className = 'btn-fullness py-3 rounded bg-amber-safety text-industrial-950 font-mono font-black text-sm';
+        }
+      });
+
+      recalcModalVal();
+    }
+
+    function recalcModalVal() {
+      const raw = parseFloat(rigConfig.capacity);
+      const net = raw * (currentFullness / 100);
+      let val = 0;
+      if (rigConfig.payModel === 'yard') val = net * rigConfig.rate;
+      else if (rigConfig.payModel === 'load') val = rigConfig.rate * (currentFullness / 100);
+
+      document.getElementById('calc-raw-yd3').innerText = raw;
+      document.getElementById('calc-net-yd3').innerText = net.toFixed(1);
+      document.getElementById('calc-val').innerText = `$${val.toFixed(2)}`;
+    }
+
+    function handleBedPhoto(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        pendingBedPhotoData = e.target.result;
+        document.getElementById('photo-preview-container').innerHTML = `
+          <div class="flex items-center justify-center gap-2 text-emerald-400 font-mono text-xs">
+            <i class="fa-solid fa-check-circle text-lg"></i>
+            <span>PHOTO ATTACHED (${(file.size / 1024).toFixed(0)} KB)</span>
+          </div>
+        `;
+      };
+      reader.readAsDataURL(file);
+    }
+
+    function commitDumpLog() {
+      const netYards = parseFloat(rigConfig.capacity) * (currentFullness / 100);
+      let ticketVal = 0;
+      if (rigConfig.payModel === 'yard') ticketVal = netYards * rigConfig.rate;
+      else if (rigConfig.payModel === 'load') ticketVal = rigConfig.rate * (currentFullness / 100);
+
+      const ticket = {
+        id: 'TKT-' + Math.floor(100000 + Math.random() * 900000),
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        date: new Date().toLocaleDateString(),
+        truck: rigConfig.truckId,
+        operator: rigConfig.operator,
+        fullness: currentFullness,
+        netYards: netYards,
+        material: document.getElementById('dump-material').value,
+        destination: document.getElementById('dump-site').value,
+        val: ticketVal,
+        lat: currentPos.lat.toFixed(5),
+        lng: currentPos.lng.toFixed(5),
+        inZone: lastGeofenceStatus === 'INSIDE',
+        photo: pendingBedPhotoData
+      };
+
+      tickets.unshift(ticket);
+      localStorage.setItem('TITAN_TICKETS', JSON.stringify(tickets));
+
+      // Haptic Vibration & Audio
+      if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
+      soundDumpSuccess();
+      cabSpeak(`Load ticket recorded. ${netYards.toFixed(1)} cubic yards.`);
+
+      pendingBedPhotoData = null;
+      document.getElementById('photo-preview-container').innerHTML = `
+        <i class="fa-solid fa-camera text-2xl text-visblue mb-1"></i>
+        <span class="block text-xs font-mono text-slate-400">SNAP LOAD BED PHOTO</span>
+      `;
+
+      toggleModal('modal-dump');
+      refreshHUD();
+    }
+
+    /* -------------------------------------------------------------
+     * POI HAZARDS
+     * ----------------------------------------------------------- */
+    function openHazardModal() {
+      toggleModal('modal-hazard');
+    }
+
+    function commitHazardPoi(e) {
+      e.preventDefault();
+      const poi = {
+        id: 'HZ-' + Math.floor(1000 + Math.random() * 9000),
+        category: document.getElementById('hz-category').value,
+        equipment: document.getElementById('hz-rig-type').value,
+        notes: document.getElementById('hz-notes').value || 'Immediate clearing assistance required.',
+        lat: currentPos.lat,
+        lng: currentPos.lng,
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      };
+
+      hazards.unshift(poi);
+      localStorage.setItem('TITAN_HAZARDS', JSON.stringify(hazards));
+
+      soundHazardAlert();
+      cabSpeak("Hazard pin submitted to incident map.");
+      renderStoredHazards();
+      toggleModal('modal-hazard');
+      document.getElementById('hz-notes').value = '';
+      refreshHUD();
+    }
+
+    function renderStoredHazards() {
+      hazardLayerGroup.clearLayers();
+      hazards.forEach((h, index) => {
+        const icon = L.divIcon({
+          html: `<div class="bg-hazard-red text-white w-8 h-8 rounded-full border-2 border-industrial-950 flex items-center justify-center shadow-2xl text-sm"><i class="fa-solid fa-triangle-exclamation"></i></div>`,
+          className: 'poi-icon',
+          iconSize: [32, 32],
+          iconAnchor: [16, 16]
+        });
+        const marker = L.marker([h.lat, h.lng], { icon: icon }).addTo(hazardLayerGroup);
+        marker.bindPopup(`
+          <div class="font-mono text-xs text-industrial-950 p-1">
+            <b class="text-hazard-red">${h.category}</b><br>
+            <span>Req: ${h.equipment}</span><br>
+            <span class="italic">${h.notes}</span>
+          </div>
+        `);
+      });
+    }
+
+    function deleteHazard(index) {
+      hazards.splice(index, 1);
+      localStorage.setItem('TITAN_HAZARDS', JSON.stringify(hazards));
+      renderStoredHazards();
+      populateReports();
+      refreshHUD();
+    }
+
+    /* -------------------------------------------------------------
+     * TELEMETRY REFRESH & SETTINGS
+     * ----------------------------------------------------------- */
+    function refreshHUD() {
+      let totalYds = 0;
+      let totalRevenue = 0;
+
+      tickets.forEach(t => {
+        totalYds += t.netYards;
+        totalRevenue += t.val;
+      });
+
+      if (rigConfig.payModel === 'hour') {
+        const hours = Math.max(0.5, (Date.now() - rigConfig.shiftStart) / (1000 * 60 * 60));
+        totalRevenue = hours * rigConfig.rate;
+      }
+
+      document.getElementById('hud-total-yd3').innerText = Math.round(totalYds).toLocaleString();
+      document.getElementById('hud-gross-val').innerText = `$${totalRevenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+      
+      document.getElementById('rep-loads-count').innerText = tickets.length;
+      document.getElementById('rep-volume-yd3').innerText = totalYds.toFixed(1);
+      document.getElementById('rep-gross-val').innerText = `$${totalRevenue.toFixed(2)}`;
+      document.getElementById('rep-hazards-count').innerText = hazards.length;
+    }
+
+    function saveFleetSettings() {
+      rigConfig.truckId = document.getElementById('cfg-truck-id').value;
+      rigConfig.operator = document.getElementById('cfg-operator').value;
+      rigConfig.capacity = parseFloat(document.getElementById('cfg-capacity').value);
+      rigConfig.dims = document.getElementById('cfg-dims').value;
+      rigConfig.payModel = document.getElementById('cfg-pay-model').value;
+      rigConfig.rate = parseFloat(document.getElementById('cfg-rate-val').value);
+
+      localStorage.setItem('TITAN_RIG_CFG', JSON.stringify(rigConfig));
+      loadState();
+      refreshHUD();
+      toggleModal('modal-settings');
+      cabSpeak("Configuration parameters verified.");
+    }
+
+    function purgeShiftHistory() {
+      if (confirm("Reset current shift logs and ticket sequence?")) {
+        tickets = [];
+        hazards = [];
+        breadcrumbTrail = [];
+        localStorage.removeItem('TITAN_TICKETS');
+        localStorage.removeItem('TITAN_HAZARDS');
+        breadcrumbLayer.setLatLngs([]);
+        renderStoredHazards();
+        refreshHUD();
+        toggleModal('modal-settings');
+      }
+    }
+
+    /* -------------------------------------------------------------
+     * REPORT RENDERING & FEMA AUDIT EXPORTS (CSV / PDF)
+     * ----------------------------------------------------------- */
+    function populateReports() {
+      refreshHUD();
+      const tBody = document.getElementById('rep-tickets-tbody');
+      tBody.innerHTML = '';
+
+      if (tickets.length === 0) {
+        tBody.innerHTML = `<tr><td colspan="7" class="p-4 text-center text-slate-500 italic">No tickets generated for this operating shift.</td></tr>`;
+      } else {
+        tickets.forEach(t => {
+          tBody.innerHTML += `
+            <tr class="hover:bg-industrial-800/40">
+              <td class="p-2.5 font-bold text-amber-safety">${t.id}</td>
+              <td class="p-2.5 text-slate-300">${t.time}</td>
+              <td class="p-2.5 text-slate-200 text-[11px]">${t.material}</td>
+              <td class="p-2.5 font-bold">${t.fullness}%</td>
+              <td class="p-2.5 text-visblue font-black">${t.netYards.toFixed(1)} yd³</td>
+              <td class="p-2.5">${t.inZone ? '<span class="text-emerald-400">IN-SECTOR</span>' : '<span class="text-amber-safety">OUT-SECTOR</span>'}</td>
+              <td class="p-2.5 text-right font-black text-emerald-400">$${t.val.toFixed(2)}</td>
+            </tr>
+          `;
+        });
+      }
+
+      const hBody = document.getElementById('rep-hazards-tbody');
+      hBody.innerHTML = '';
+      if (hazards.length === 0) {
+        hBody.innerHTML = `<tr><td colspan="6" class="p-4 text-center text-slate-500 italic">No hazards currently logged.</td></tr>`;
+      } else {
+        hazards.forEach((h, idx) => {
+          hBody.innerHTML += `
+            <tr class="hover:bg-industrial-800/40">
+              <td class="p-2.5 font-bold text-hazard-red">${h.id}</td>
+              <td class="p-2.5 text-white">${h.category}</td>
+              <td class="p-2.5 text-visblue">${h.equipment}</td>
+              <td class="p-2.5 text-slate-400 text-[10px]">${h.lat.toFixed(4)}, ${h.lng.toFixed(4)}</td>
+              <td class="p-2.5 text-slate-300">${h.notes}</td>
+              <td class="p-2.5 text-right">
+                <button onclick="deleteHazard(${idx})" class="text-slate-400 hover:text-hazard-red"><i class="fa-solid fa-trash"></i></button>
+              </td>
+            </tr>
+          `;
+        });
+      }
+    }
+
+    function exportAuditCSV() {
+      if (tickets.length === 0) {
+        alert("No haul cycles logged to export.");
+        return;
+      }
+
+      let csv = 'FEMA_TICKET,DATE,TIME,TRUCK_ID,OPERATOR,BED_FULLNESS,NET_YD3,MATERIAL,DESTINATION,COORDINATES,VALUATION\n';
+      tickets.forEach(t => {
+        csv += `"${t.id}","${t.date}","${t.time}","${t.truck}","${t.operator}","${t.fullness}%","${t.netYards}","${t.material}","${t.destination}","${t.lat},${t.lng}","${t.val.toFixed(2)}"\n`;
+      });
+
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `DEBRIS_MANIFEST_${rigConfig.truckId}_${Date.now()}.csv`;
+      a.click();
+    }
+
+    function generateAuditPDF() {
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF('p', 'pt', 'letter');
+
+      // Title & FEMA Header
+      doc.setFillColor(17, 22, 31);
+      doc.rect(0, 0, 612, 70, 'F');
+      
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(255, 179, 0);
+      doc.setFontSize(16);
+      doc.text("USACE / FEMA 325 DEBRIS LOAD AUDIT MANIFEST", 36, 32);
+
+      doc.setFontSize(9);
+      doc.setTextColor(200, 200, 200);
+      doc.text(`TRUCK PLACARD: ${rigConfig.truckId}  |  OPERATOR: ${rigConfig.operator}  |  DATE: ${new Date().toLocaleDateString()}`, 36, 52);
+
+      // Summary Table
+      let totalYds = tickets.reduce((acc, c) => acc + c.netYards, 0);
+      let totalVal = tickets.reduce((acc, c) => acc + c.val, 0);
+
+      const tableRows = tickets.map(t => [
+        t.id,
+        t.time,
+        t.material.substring(0, 24),
+        `${t.fullness}%`,
+        `${t.netYards.toFixed(1)} yd³`,
+        t.inZone ? 'IN-SECTOR' : 'OUT-ZONE',
+        `$${t.val.toFixed(2)}`
+      ]);
+
+      doc.autoTable({
+        startY: 90,
+        head: [['TICKET #', 'TIME', 'MATERIAL', 'FULLNESS', 'VOLUME', 'ZONE STATUS', 'VALUATION']],
+        body: tableRows,
+        theme: 'striped',
+        headStyles: { fillColor: [30, 37, 48], textColor: [255, 179, 0], fontStyle: 'bold' },
+        styles: { fontSize: 8, font: 'courier' }
+      });
+
+      // Signature Chain of Custody
+      const finalY = doc.lastAutoTable.finalY + 40;
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+      doc.setTextColor(60, 60, 60);
+
+      doc.line(36, finalY, 240, finalY);
+      doc.text("PRIME CONTRACTOR MONITOR SIGNATURE", 36, finalY + 12);
+
+      doc.line(360, finalY, 570, finalY);
+      doc.text("DISPOSAL SITE TOWER INSPECTOR", 360, finalY + 12);
+
+      doc.save(`FEMA_AUDIT_${rigConfig.truckId}_${Date.now()}.pdf`);
+    }
+
+    /* -------------------------------------------------------------
+     * UI MODAL CONTROLLER
+     * ----------------------------------------------------------- */
+    function toggleModal(id) {
+      const el = document.getElementById(id);
+      if (el.classList.contains('hidden')) {
+        if (id === 'modal-reports') populateReports();
+        el.classList.remove('hidden');
+      } else {
+        el.classList.add('hidden');
+      }
+    }
+  </script>
+  <!-- PWA Service Worker & Install Logic -->
+  <script>
+    let deferredPrompt = null;
+    const pwaInstallBtn = document.getElementById('btn-pwa-install');
+
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+    if (!isStandalone) {
+      if (pwaInstallBtn) pwaInstallBtn.classList.remove('hidden');
+    }
+
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      deferredPrompt = e;
+      if (pwaInstallBtn) pwaInstallBtn.classList.remove('hidden');
+    });
+
+    window.addEventListener('appinstalled', () => {
+      deferredPrompt = null;
+      if (pwaInstallBtn) pwaInstallBtn.classList.add('hidden');
+    });
+
+    async function promptPWAInstall() {
+      if (deferredPrompt) {
+        deferredPrompt.prompt();
+        const { outcome } = await deferredPrompt.userChoice;
+        if (outcome === 'accepted') {
+          deferredPrompt = null;
+          if (pwaInstallBtn) pwaInstallBtn.classList.add('hidden');
+        }
+      } else {
+        const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+        if (isIOS) {
+          alert('To install on iPhone/iPad:\n1. Tap the Share button at the bottom of Safari.\n2. Scroll down and tap "Add to Home Screen".');
+        } else {
+          alert('To install TITAN Heavy Ops:\nTap your browser menu (⋮) and select "Install App" or "Add to Home screen".');
+        }
+      }
+    }
+
+    if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./service-worker.js').catch((err) => {
+          console.warn('SW registration:', err);
+        });
+      });
+    }
+  </script>
+
+</body>
+</html>

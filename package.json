@@ -1,0 +1,21 @@
+{
+  "name": "loadtracker",
+  "version": "1.0.0",
+  "description": "- [Project Vision & Core Goals](#project-vision--core-goals)\r - [Core Feature Requirements](#core-feature-requirements)\r   - [Direct Access & Header Toolbar](#direct-access--header-toolbar)\r   - [Interactive Map & Geofencing](#interactive-map--geofencing)\r   - [Dump & Load Management Configuration](#dump--load-management-configuration)\r   - [POI & Hazard Logger](#poi--hazard-logger)\r   - [Summary & Data Export](#summary--data-export)\r - [Technical & Design Specifications](#technical--design-specifications)\r - [Installation & Quick Start](#installation--quick-start)\r - [Running the PWA Locally](#running-the-pwa-locally)\r - [Development & Build Notes](#development--build-notes)\r - [License](#license)",
+  "main": "service-worker.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/chanceb2316/LoadTracker.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/chanceb2316/LoadTracker/issues"
+  },
+  "homepage": "https://github.com/chanceb2316/LoadTracker#readme"
+}
