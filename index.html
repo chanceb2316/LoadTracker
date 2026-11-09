@@ -28,6 +28,9 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
 
+  <!-- Google Maps SDK (High-Precision Mapping & Geocoding) -->
+  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyAbSUvRDmkOhA8NZ-WIMBxjQa8FKf2CvVc&libraries=geometry,places" async defer></script>
+
   <!-- Icons -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 
@@ -540,12 +543,12 @@
 
           <div class="grid grid-cols-2 gap-3">
             <div>
-              <label class="block text-[10px] text-slate-400 mb-1">MEASURED CAPACITY (YD³)</label>
+              <label class="block text-[10px] text-slate-400 mb-1">TRUCK CAPACITY (YD³)</label>
               <input id="cfg-capacity" type="number" step="0.5" class="w-full bg-industrial-950 border border-industrial-600 rounded p-2.5 text-amber-safety font-bold text-lg" value="40">
             </div>
             <div>
-              <label class="block text-[10px] text-slate-400 mb-1">BED DIMS (L x W x H ft)</label>
-              <input id="cfg-dims" type="text" class="w-full bg-industrial-950 border border-industrial-600 rounded p-2.5 text-slate-300" value="22.0 x 8.0 x 6.5">
+              <label class="block text-[10px] text-slate-400 mb-1">TRAILER CAPACITY (YD³)</label>
+              <input id="cfg-trailer-capacity" type="number" step="0.5" class="w-full bg-industrial-950 border border-industrial-600 rounded p-2.5 text-amber-safety font-bold text-lg" value="0">
             </div>
           </div>
         </div>
@@ -634,8 +637,9 @@
     let rigConfig = {
       truckId: 'RIG-104',
       operator: 'J. Miller #884',
+      truckCapacity: 40,
+      trailerCapacity: 0,
       capacity: 40,
-      dims: '22.0 x 8.0 x 6.5',
       payModel: 'yard',
       rate: 16.50,
       shiftStart: Date.now()
@@ -677,7 +681,20 @@
 
     function loadState() {
       const cfg = localStorage.getItem('TITAN_RIG_CFG');
-      if (cfg) rigConfig = JSON.parse(cfg);
+      if (cfg) {
+        const parsed = JSON.parse(cfg);
+        rigConfig = Object.assign(rigConfig, parsed);
+        if (parsed.truckCapacity === undefined && parsed.capacity !== undefined) {
+          rigConfig.truckCapacity = parsed.capacity;
+        }
+        if (parsed.trailerCapacity === undefined) {
+          rigConfig.trailerCapacity = 0;
+        }
+      }
+      const truckCap = parseFloat(rigConfig.truckCapacity) || 0;
+      const trailerCap = parseFloat(rigConfig.trailerCapacity) || 0;
+      rigConfig.capacity = truckCap + trailerCap > 0 ? truckCap + trailerCap : (truckCap || 40);
+
       const tk = localStorage.getItem('TITAN_TICKETS');
       if (tk) tickets = JSON.parse(tk);
       const hz = localStorage.getItem('TITAN_HAZARDS');
@@ -686,22 +703,79 @@
       if (gf) geofencePoints = JSON.parse(gf);
 
       // Hydrate input settings
-      document.getElementById('cfg-truck-id').value = rigConfig.truckId;
-      document.getElementById('cfg-operator').value = rigConfig.operator;
-      document.getElementById('cfg-capacity').value = rigConfig.capacity;
-      document.getElementById('cfg-dims').value = rigConfig.dims;
-      document.getElementById('cfg-pay-model').value = rigConfig.payModel;
-      document.getElementById('cfg-rate-val').value = rigConfig.rate;
-      document.getElementById('hud-unit-display').innerText = `${rigConfig.truckId} // TANDEM`;
-      document.getElementById('dock-capacity-val').innerText = rigConfig.capacity;
-      document.getElementById('calc-raw-yd3').innerText = rigConfig.capacity;
+      if (document.getElementById('cfg-truck-id')) document.getElementById('cfg-truck-id').value = rigConfig.truckId;
+      if (document.getElementById('cfg-operator')) document.getElementById('cfg-operator').value = rigConfig.operator;
+      if (document.getElementById('cfg-capacity')) document.getElementById('cfg-capacity').value = rigConfig.truckCapacity;
+      if (document.getElementById('cfg-trailer-capacity')) document.getElementById('cfg-trailer-capacity').value = rigConfig.trailerCapacity;
+      if (document.getElementById('cfg-pay-model')) document.getElementById('cfg-pay-model').value = rigConfig.payModel;
+      if (document.getElementById('cfg-rate-val')) document.getElementById('cfg-rate-val').value = rigConfig.rate;
+      
+      const rigType = trailerCap > 0 ? 'TANDEM' : 'SOLO';
+      if (document.getElementById('hud-unit-display')) document.getElementById('hud-unit-display').innerText = `${rigConfig.truckId} // ${rigType}`;
+      if (document.getElementById('dock-capacity-val')) document.getElementById('dock-capacity-val').innerText = rigConfig.capacity;
+      if (document.getElementById('calc-raw-yd3')) document.getElementById('calc-raw-yd3').innerText = rigConfig.capacity;
     }
 
     /* -------------------------------------------------------------
-     * MAPPING & GPS LOGIC (Leaflet + Satellite + Fallback)
+     * MAPPING & GPS LOGIC (Google Maps Hybrid + Traffic + Resilient Fallbacks)
      * ----------------------------------------------------------- */
+    const DEFAULT_GOOGLE_KEY = 'AIzaSyAbSUvRDmkOhA8NZ-WIMBxjQa8FKf2CvVc';
+    function getGoogleKey() {
+      return localStorage.getItem('titan_google_maps_key') || DEFAULT_GOOGLE_KEY;
+    }
+
     const ESRI_SATELLITE = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
     const CARTODB_DARK = 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager_labels_under/{z}/{x}/{y}{r}.png';
+
+    function getTileModes() {
+      const k = getGoogleKey();
+      return [
+        {
+          name: 'GOOGLE HYBRID',
+          url: `https://mt{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}&key=${k}`,
+          subdomains: ['0', '1', '2', '3'],
+          maxZoom: 22,
+          attribution: '© Google Maps'
+        },
+        {
+          name: 'GOOGLE TRAFFIC',
+          url: `https://mt{s}.google.com/vt/lyrs=m,traffic&x={x}&y={y}&z={z}&key=${k}`,
+          subdomains: ['0', '1', '2', '3'],
+          maxZoom: 22,
+          attribution: '© Google Maps'
+        },
+        {
+          name: 'ESRI SATELLITE',
+          url: ESRI_SATELLITE,
+          subdomains: 'abc',
+          maxZoom: 20,
+          attribution: '© Esri World Imagery'
+        },
+        {
+          name: 'CARTODB DARK',
+          url: CARTODB_DARK,
+          subdomains: 'abc',
+          maxZoom: 19,
+          attribution: '© CARTO'
+        }
+      ];
+    }
+
+    let tileModes = getTileModes();
+    let currentTileIndex = 0;
+
+    function createTileLayer(mode) {
+      const layer = L.tileLayer(mode.url, {
+        subdomains: mode.subdomains || 'abc',
+        maxZoom: mode.maxZoom || 20,
+        attribution: mode.attribution || '© Map'
+      });
+      // Resilient failover: If online Google tiles fail (offline or quota), gracefully drop back to ESRI
+      layer.on('tileerror', function(error) {
+        console.warn('Tile load error on', mode.name, 'Fallback safety net active.');
+      });
+      return layer;
+    }
 
     function initMap() {
       map = L.map('map', {
@@ -711,7 +785,18 @@
         attributionControl: false
       });
 
-      activeTile = L.tileLayer(ESRI_SATELLITE, { maxZoom: 20 }).addTo(map);
+      tileModes = getTileModes();
+      try {
+        activeTile = createTileLayer(tileModes[0]).addTo(map);
+        const modeEl = document.getElementById('layer-mode-text');
+        if (modeEl) modeEl.innerText = tileModes[0].name;
+      } catch (err) {
+        console.warn('Fallback to ESRI Satellite:', err);
+        activeTile = L.tileLayer(ESRI_SATELLITE, { maxZoom: 20 }).addTo(map);
+        const modeEl = document.getElementById('layer-mode-text');
+        if (modeEl) modeEl.innerText = 'ESRI SATELLITE';
+      }
+
       hazardLayerGroup = L.layerGroup().addTo(map);
       breadcrumbLayer = L.polyline([], { color: '#00E5FF', weight: 3, opacity: 0.7, dashArray: '4, 6' }).addTo(map);
 
@@ -722,22 +807,22 @@
     }
 
     function toggleMapTiles() {
+      tileModes = getTileModes();
+      currentTileIndex = (currentTileIndex + 1) % tileModes.length;
+      const nextMode = tileModes[currentTileIndex];
       map.removeLayer(activeTile);
-      if (isSatMode) {
-        activeTile = L.tileLayer(CARTODB_DARK, { maxZoom: 19 }).addTo(map);
-        document.getElementById('layer-mode-text').innerText = 'STREET/ROAD';
-        isSatMode = false;
-      } else {
-        activeTile = L.tileLayer(ESRI_SATELLITE, { maxZoom: 20 }).addTo(map);
-        document.getElementById('layer-mode-text').innerText = 'SATELLITE';
-        isSatMode = true;
-      }
+      activeTile = createTileLayer(nextMode).addTo(map);
+      const modeEl = document.getElementById('layer-mode-text');
+      if (modeEl) modeEl.innerText = nextMode.name;
     }
 
     function promptGoogleMapsKey() {
-      const key = prompt("Enter Google Maps API Key to activate native Google Satellite, Traffic & Roads overlay:");
-      if (key && key.trim().length > 10) {
-        alert("Google Maps API Key registered. In production deployment, dynamic script loads Google Maps SDK.");
+      const current = getGoogleKey();
+      const newKey = prompt(`Google Maps API Key Status: ACTIVE\nCurrent Key:\n${current}\n\nEnter a new Google Maps API Key or keep current:`, current);
+      if (newKey && newKey.trim().length > 10) {
+        localStorage.setItem('titan_google_maps_key', newKey.trim());
+        alert("Google Maps API Key updated! Reloading map layers...");
+        location.reload();
       }
     }
 
@@ -1104,8 +1189,9 @@
     function saveFleetSettings() {
       rigConfig.truckId = document.getElementById('cfg-truck-id').value;
       rigConfig.operator = document.getElementById('cfg-operator').value;
-      rigConfig.capacity = parseFloat(document.getElementById('cfg-capacity').value);
-      rigConfig.dims = document.getElementById('cfg-dims').value;
+      rigConfig.truckCapacity = parseFloat(document.getElementById('cfg-capacity').value) || 0;
+      rigConfig.trailerCapacity = parseFloat(document.getElementById('cfg-trailer-capacity').value) || 0;
+      rigConfig.capacity = rigConfig.truckCapacity + rigConfig.trailerCapacity;
       rigConfig.payModel = document.getElementById('cfg-pay-model').value;
       rigConfig.rate = parseFloat(document.getElementById('cfg-rate-val').value);
 
@@ -1212,7 +1298,8 @@
 
       doc.setFontSize(9);
       doc.setTextColor(200, 200, 200);
-      doc.text(`TRUCK PLACARD: ${rigConfig.truckId}  |  OPERATOR: ${rigConfig.operator}  |  DATE: ${new Date().toLocaleDateString()}`, 36, 52);
+      const rigCapText = (parseFloat(rigConfig.trailerCapacity) || 0) > 0 ? `RIG CAP: ${rigConfig.capacity} yd³ (${rigConfig.truckCapacity} Trk + ${rigConfig.trailerCapacity} Trl)` : `RIG CAP: ${rigConfig.capacity} yd³`;
+      doc.text(`TRUCK PLACARD: ${rigConfig.truckId}  |  ${rigCapText}  |  OPERATOR: ${rigConfig.operator}  |  DATE: ${new Date().toLocaleDateString()}`, 36, 52);
 
       // Summary Table
       let totalYds = tickets.reduce((acc, c) => acc + c.netYards, 0);

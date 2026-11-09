@@ -5,6 +5,11 @@ android/build/
 android/app/build/
 android/local.properties
 
+# Temporary and crash logs
+*.log
+*.idsig
+.vscode/
+
 # Node / OS
 node_modules/
 .DS_Store
